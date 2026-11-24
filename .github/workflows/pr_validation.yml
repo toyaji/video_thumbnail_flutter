@@ -52,10 +52,6 @@ jobs:
           flutter test
 
       # 예제 앱은 최신 템플릿(Dart 3.14)이라 CI 기준 버전에서만 검사한다.
-      - name: Format
-        if: matrix.flutter == env.FLUTTER_VERSION
-        run: dart format --output=none --set-exit-if-changed lib test example/lib example/test example/integration_test
-
       - name: Analyze & test example
         if: matrix.flutter == env.FLUTTER_VERSION
         working-directory: example
@@ -63,6 +59,11 @@ jobs:
           flutter pub get
           flutter analyze
           flutter test
+
+      # dart format은 패키지의 Dart 언어 버전으로 스타일을 정하므로 예제 의존성을 받은 뒤에 돌린다.
+      - name: Format
+        if: matrix.flutter == env.FLUTTER_VERSION
+        run: dart format --output=none --set-exit-if-changed lib test example/lib example/test example/integration_test
 
   android_build:
     name: Android Build
