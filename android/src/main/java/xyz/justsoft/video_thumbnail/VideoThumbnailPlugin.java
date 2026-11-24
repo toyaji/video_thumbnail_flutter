@@ -3,6 +3,7 @@ package xyz.justsoft.video_thumbnail;
 import android.content.Context;
 import android.graphics.Bitmap;
 import android.media.MediaMetadataRetriever;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
@@ -76,7 +77,7 @@ public class VideoThumbnailPlugin implements FlutterPlugin, MethodCallHandler {
         final int maxh = intArg(call, "maxh");
         final int maxw = intArg(call, "maxw");
         final int timeMs = intArg(call, "timeMs");
-        final int quality = intArg(call, "quality");
+        final int quality = Math.max(0, Math.min(100, intArg(call, "quality")));
 
         executor.execute(() -> {
             try {
@@ -85,11 +86,13 @@ public class VideoThumbnailPlugin implements FlutterPlugin, MethodCallHandler {
                         : buildThumbnailData(video, headers, format, maxh, maxw, timeMs, quality);
                 mainHandler.post(() -> result.success(thumbnail));
             } catch (ThumbnailException e) {
-                Log.w(TAG, e.getMessage(), e.getCause());
+                // 영상 URL에 서명 토큰이 붙을 수 있어 로그에는 남기지 않는다. URL은 Dart로 가는 메시지에만 담는다.
+                Log.w(TAG, "thumbnail failed: " + e.code, e.getCause());
                 mainHandler.post(() -> result.error(e.code, e.getMessage(), causeDetails(e)));
-            } catch (Exception e) {
+            } catch (Throwable e) {
+                // 원본 해상도 프레임의 OutOfMemoryError 등도 응답해야 Dart Future가 끝난다.
                 Log.w(TAG, "thumbnail failed", e);
-                mainHandler.post(() -> result.error("exception", String.valueOf(e), null));
+                mainHandler.post(() -> result.error("no_frame", "Failed to create the thumbnail: " + e, null));
             }
         });
     }
@@ -179,12 +182,9 @@ public class VideoThumbnailPlugin implements FlutterPlugin, MethodCallHandler {
     }
 
     private static String thumbnailFileName(String video, String ext) {
-        String name = video;
-        final int query = name.indexOf('?');
-        if (query >= 0 && !video.startsWith("/")) {
-            name = name.substring(0, query);
-        }
-        name = name.substring(name.lastIndexOf('/') + 1);
+        String name = video.startsWith("/") ? video : Uri.parse(video).getLastPathSegment();
+        // 디코딩된 세그먼트에 %2F가 풀린 '/'가 있을 수 있어(Firebase Storage URL 등) 마지막 부분만 쓴다. iOS와 같다.
+        name = name == null ? "" : new File(name).getName();
         final int dot = name.lastIndexOf('.');
         if (dot > 0) {
             name = name.substring(0, dot);

@@ -13,6 +13,8 @@
 * **Android 리소스 누수 수정**: 영상 파일 스트림을 닫고(원본 #166), 축소 전 원본 비트맵을 해제합니다.
 * **Android `timeMs` 넘침 수정**: 약 35분 47초를 넘는 `timeMs`가 `int` 곱셈으로 넘치던 문제를 고쳤습니다.
 * **Android 빌드 경고 정리**: 인자 캐스트 경고를 없애고, API 30 이상에서는 deprecated된 `WEBP` 대신 `WEBP_LOSSY`/`WEBP_LOSSLESS`를 씁니다(quality 100이면 무손실, iOS와 같음). (원본 #205)
+* **입력 정리**: `quality`가 0-100 밖이면 범위 안으로 자릅니다. URL 영상의 파일 이름은 두 플랫폼 모두 URL 경로의 마지막 부분(퍼센트 디코딩)으로 정하고, 없으면 `thumbnail`을 씁니다.
+* **Android 로그에서 영상 URL 제거**: 서명 토큰이 붙은 URL이 logcat에 남지 않도록 실패 로그에는 오류 코드만 남깁니다.
 * **[BREAKING] 최소 버전 상향**: Flutter 3.44 / Dart 3.7, iOS 13.0, Android API 24(Flutter 3.50 기본값).
 * **Dart**: null safety 이전 문법 정리, `flutter_lints` 적용, `invokeMethod`에 반환 타입 명시.
 * **테스트·CI**: MethodChannel 인자·오류 단위 테스트와 예제 앱 통합 테스트(실제 영상으로 형식·크기·경로·오류 코드 확인)를 새로 작성하고, PR마다 format·analyze·test·Android 빌드·iOS SPM 빌드·`pub publish --dry-run`을 실행합니다.

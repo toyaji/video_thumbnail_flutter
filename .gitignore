@@ -5,5 +5,5 @@
 build/
 .idea/
 *.iml
-pubspec.lock
+/pubspec.lock
 coverage/

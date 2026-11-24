@@ -138,6 +138,42 @@ void main() {
       skip: Platform.isAndroid,
     );
 
+    test('file:// 경로와 0-100 밖의 quality도 받는다', () async {
+      final bytes = (await VideoThumbnail.thumbnailData(
+        video: 'file://$sdr',
+        imageFormat: ImageFormat.JPEG,
+        quality: 150,
+      ))!;
+      expect(bytes.sublist(0, 2), [0xFF, 0xD8]);
+    });
+
+    test('maxWidth와 maxHeight를 함께 주면 그 안에 맞춘다', () async {
+      final bytes = (await VideoThumbnail.thumbnailData(
+        video: sdr,
+        imageFormat: ImageFormat.PNG,
+        maxWidth: 100,
+        maxHeight: 100,
+      ))!;
+      final image = await decode(bytes);
+      expect(image.width, 100);
+      expect(image.height, 75);
+    });
+
+    test('영상이 아닌 파일은 source_error PlatformException으로 실패한다', () async {
+      final garbage = File('${root.path}/garbage.mp4')
+        ..writeAsStringSync('not a video');
+      await expectLater(
+        VideoThumbnail.thumbnailData(video: garbage.path),
+        throwsA(
+          isA<PlatformException>().having(
+            (e) => e.code,
+            'code',
+            'source_error',
+          ),
+        ),
+      );
+    });
+
     test('없는 파일은 source_error PlatformException으로 실패한다', () async {
       await expectLater(
         VideoThumbnail.thumbnailData(video: '${root.path}/missing.mp4'),

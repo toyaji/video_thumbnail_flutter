@@ -20,21 +20,24 @@ env:
 
 jobs:
   lint_and_test:
-    name: Lint & Test
+    name: Lint & Test (Flutter ${{ matrix.flutter }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # pubspec의 최소 Flutter 버전과 CI 기준 버전
+        flutter: ["3.44.0", "3.50.1"]
     steps:
       - uses: actions/checkout@v7
 
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
-          flutter-version: ${{ env.FLUTTER_VERSION }}
+          flutter-version: ${{ matrix.flutter }}
           cache: true
 
       - name: Install dependencies
-        run: |
-          flutter pub get
-          cd example && flutter pub get
+        run: flutter pub get --no-example
 
       - name: Prevent lint ignores
         run: |
@@ -43,18 +46,23 @@ jobs:
             exit 1
           fi
 
+      - name: Analyze & test package
+        run: |
+          flutter analyze lib test
+          flutter test
+
+      # 예제 앱은 최신 템플릿(Dart 3.14)이라 CI 기준 버전에서만 검사한다.
       - name: Format
+        if: matrix.flutter == env.FLUTTER_VERSION
         run: dart format --output=none --set-exit-if-changed lib test example/lib example/test example/integration_test
 
-      - name: Analyze
+      - name: Analyze & test example
+        if: matrix.flutter == env.FLUTTER_VERSION
+        working-directory: example
         run: |
+          flutter pub get
           flutter analyze
-          cd example && flutter analyze
-
-      - name: Test
-        run: |
           flutter test
-          cd example && flutter test
 
   android_build:
     name: Android Build
@@ -65,7 +73,7 @@ jobs:
       - uses: actions/setup-java@v6
         with:
           distribution: zulu
-          java-version: "17"
+          java-version: "21"
 
       - uses: subosito/flutter-action@v2
         with:
@@ -110,7 +118,7 @@ jobs:
           cache: true
 
       - name: Install dependencies
-        run: flutter pub get
+        run: flutter pub get --no-example
 
       - name: Verify pub.dev publishing
         run: flutter pub publish --dry-run

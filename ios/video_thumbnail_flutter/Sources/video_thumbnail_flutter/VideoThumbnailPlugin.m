@@ -53,7 +53,7 @@ static void ReplyOnMain(FlutterResult result, id value) {
     int maxh = [NilIfNull(args[@"maxh"]) intValue];
     int maxw = [NilIfNull(args[@"maxw"]) intValue];
     int timeMs = [NilIfNull(args[@"timeMs"]) intValue];
-    int quality = [NilIfNull(args[@"quality"]) intValue];
+    int quality = MAX(0, MIN(100, [NilIfNull(args[@"quality"]) intValue]));
 
     NSString *localPath = [video hasPrefix:@"file://"] ? [video substringFromIndex:7] : [video hasPrefix:@"/"] ? video : nil;
     BOOL isLocalFile = localPath != nil;
@@ -92,8 +92,11 @@ static void ReplyOnMain(FlutterResult result, id value) {
     NSString *ext = [VideoThumbnailPlugin extensionFor:format];
     // 경로는 NSURL을 거치지 않고 호출자가 준 문자열로 만든다. NSURL은 한글을 자모 분리형(NFD)으로 바꿔 돌려준다.
     NSString *lastComponent = localPath != nil ? localPath.lastPathComponent : video.lastPathComponent;
-    NSString *baseName = lastComponent.stringByDeletingPathExtension.length > 0 ? lastComponent.stringByDeletingPathExtension : @"thumbnail";
-    NSString *fileName = [baseName stringByAppendingPathExtension:ext];
+    NSString *baseName = lastComponent.stringByDeletingPathExtension;
+    if (baseName.length == 0 || [baseName isEqualToString:@"/"]) {
+        baseName = @"thumbnail";
+    }
+    NSString *fileName = [baseName stringByAppendingPathExtension:ext] ?: [@"thumbnail" stringByAppendingPathExtension:ext];
     NSString *cacheDir = [NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES) lastObject];
 
     NSMutableArray<NSString *> *targets = [NSMutableArray array];
@@ -137,8 +140,13 @@ static void ReplyOnMain(FlutterResult result, id value) {
     NSError *frameError = nil;
     CGImageRef cgImage = [generator copyCGImageAtTime:CMTimeMake(timeMs, 1000) actualTime:nil error:&frameError];
     if (cgImage == NULL) {
-        BOOL unreadable = [frameError.domain isEqualToString:NSURLErrorDomain] || [frameError.domain isEqualToString:NSCocoaErrorDomain] ||
-                          frameError.code == AVErrorFileFormatNotRecognized || frameError.code == AVErrorContentIsUnavailable;
+        BOOL avUnreadable = [frameError.domain isEqualToString:AVFoundationErrorDomain] &&
+                            (frameError.code == AVErrorFileFormatNotRecognized || frameError.code == AVErrorFileFailedToParse ||
+                             frameError.code == AVErrorContentIsUnavailable);
+        NSError *underlying = frameError.userInfo[NSUnderlyingErrorKey];
+        BOOL unreadable = avUnreadable || [frameError.domain isEqualToString:NSURLErrorDomain] ||
+                          [frameError.domain isEqualToString:NSCocoaErrorDomain] ||
+                          [underlying.domain isEqualToString:NSURLErrorDomain];
         *error = ErrorWith(unreadable ? kSourceError : kNoFrame,
                            [NSString stringWithFormat:@"Failed to read a frame at %d ms from %@", timeMs, url], frameError);
         return nil;
