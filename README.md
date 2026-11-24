@@ -1,71 +1,138 @@
-# video_thumbnail
+# video_thumbnail_flutter
 
-This plugin generates image thumbnails from video files or URLs on both Android and iOS. It returns an image in memory or saves it as a file with customizable format, resolution, and quality.
+[![pub package](https://img.shields.io/pub/v/video_thumbnail_flutter.svg)](https://pub.dev/packages/video_thumbnail_flutter)
+[![PR Validation](https://github.com/toyaji/video_thumbnail_flutter/actions/workflows/pr_validation.yml/badge.svg)](https://github.com/toyaji/video_thumbnail_flutter/actions/workflows/pr_validation.yml)
+[![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-  [![pub ver](https://img.shields.io/badge/pub-v0.5.6-blue)](https://pub.dev/packages/video_thumbnail)
-  [![license](https://img.shields.io/github/license/mashape/apistatus.svg)](https://github.com/justsoft/)
+Creates a thumbnail image from a local video file or a video URL on Android and iOS.
+It returns the image in memory or saves it as a file, in JPEG, PNG or WebP, with a
+chosen size, frame time and quality.
 
-![video-file](https://github.com/justsoft/video_thumbnail/blob/master/video_file.png?raw=true) ![video-url](https://github.com/justsoft/video_thumbnail/blob/master/video_url.png?raw=true)
+![video-file](https://github.com/toyaji/video_thumbnail_flutter/blob/main/video_file.png?raw=true) ![video-url](https://github.com/toyaji/video_thumbnail_flutter/blob/main/video_url.png?raw=true)
+
+## Fork background
+
+This is a maintained fork of [justsoft/video_thumbnail](https://github.com/justsoft/video_thumbnail),
+which has had no release since 0.5.6 (May 2025). It is published under a new name and keeps the
+**same Dart API**, so migrating only changes the import.
+
+* **Swift Package Manager**: iOS builds with SPM only, no CocoaPods needed. The podspec is kept for
+  apps that still use CocoaPods.
+* **Current Android Gradle Plugin**: AGP 9, `namespace`, compileSdk 36, Java 17, no `jcenter()`.
+* **Tested and checked on every PR**: unit tests, Android build, iOS SPM build and
+  `pub publish --dry-run` run in CI.
+
+## Requirements
+
+| | Minimum |
+|--|--|
+| Flutter | 3.44 |
+| Dart | 3.7 |
+| iOS | 13.0 |
+| Android | API 24 |
+
+## Installing
+
+```yaml
+dependencies:
+  video_thumbnail_flutter: ^1.0.0
+```
+
+```dart
+import 'package:video_thumbnail_flutter/video_thumbnail_flutter.dart';
+```
+
+### Migrating from `video_thumbnail`
+
+1. Replace `video_thumbnail` with `video_thumbnail_flutter` in `pubspec.yaml`.
+2. Replace `package:video_thumbnail/video_thumbnail.dart` with
+   `package:video_thumbnail_flutter/video_thumbnail_flutter.dart`.
+
+`VideoThumbnail`, `ImageFormat` and every parameter stay the same. Failures now arrive as a
+`PlatformException` with a [code](#errors) on both platforms, instead of `MissingPluginException`
+on Android and `null` on iOS.
 
 ## Methods
-|function|parameter|description|return|
-|--|--|--|--|
-|thumbnailData|String `[video]`, optional Map<String, dynamic> `[headers]`, ImageFormat `[imageFormat]`(JPEG/PNG/WEBP), int `[maxHeight]`(0: for the original resolution of the video, or scaled by the source aspect ratio), [maxWidth]`(0: for the original resolution of the video, or scaled by the source aspect ratio), int `[timeMs]` generates the thumbnail from the frame around the specified millisecond, int `[quality]`(0-100)|generates thumbnail from `[video]`|`[Future<Uint8List>]`|
-|thumbnailFile|String `[video]`, optional Map<String, dynamic> `[headers]`, String `[thumbnailPath]`(folder or full path where to store the thumbnail file, null to save to same folder as the video file), ImageFormat `[imageFormat]`(JPEG/PNG/WEBP), int `[maxHeight]`(0: for the original resolution of the video, or scaled by the source aspect ratio), int `[maxWidth]`(0: for the original resolution of the video, or scaled by the source aspect ratio), int `[timeMs]` generates the thumbnail from the frame around the specified millisecond, int `[quality]`(0-100)|creates a file of the thumbnail from the `[video]` |`[Future<String>]`|
 
-Warning:
-> Giving both the `maxHeight` and `maxWidth` has different result on Android platform, it actually scales the thumbnail to the specified maxHeight and maxWidth.
-> To generate the thumbnail from a network resource, the `video` must be properly URL encoded.
+|function|parameters|returns|
+|--|--|--|
+|`thumbnailData`|`video`, `headers`, `imageFormat`, `maxHeight`, `maxWidth`, `timeMs`, `quality`|`Future<Uint8List?>`: the encoded image|
+|`thumbnailFile`|`video`, `headers`, `thumbnailPath`, `imageFormat`, `maxHeight`, `maxWidth`, `timeMs`, `quality`|`Future<String?>`: the path of the saved file|
+
+* `video`: a local file path or a URL. A network URL must be properly URL encoded.
+* `headers`: HTTP headers used when `video` is a URL.
+* `thumbnailPath`: a folder, or a full file path whose extension matches `imageFormat`.
+  When omitted, the file is saved next to the video, or in the app's cache folder when that folder is
+  not writable or `video` is a URL.
+* `imageFormat`: `ImageFormat.JPEG`, `ImageFormat.PNG` (default) or `ImageFormat.WEBP`.
+* `maxHeight` / `maxWidth`: `0` keeps the video resolution; giving only one keeps the aspect ratio.
+  On Android, giving both scales the image to exactly that size.
+* `timeMs`: the frame time in milliseconds.
+* `quality`: `0`-`100`, ignored for PNG.
+
+## Errors
+
+Both methods throw a `PlatformException` when no thumbnail can be made. Its `code` is one of
+`VideoThumbnailErrorCode` and `message` / `details` carry the native cause.
+
+|code|meaning|
+|--|--|
+|`source_error`|The video could not be opened: missing file, unreadable URL or unsupported container.|
+|`no_frame`|No frame could be decoded at `timeMs`.|
+|`encode_error`|The frame could not be encoded in `imageFormat`.|
+|`io_error`|The thumbnail file could not be written.|
+
+```dart
+try {
+  final bytes = await VideoThumbnail.thumbnailData(video: path);
+} on PlatformException catch (e) {
+  if (e.code == VideoThumbnailErrorCode.noFrame) {
+    // try another timeMs
+  }
+}
+```
 
 ## Usage
 
-**Installing**
-add [video_thumbnail](https://pub.dev/packages/video_thumbnail) as a dependency in your pubspec.yaml file.
-```yaml
-dependencies:
-  video_thumbnail: ^0.5.6
-```
-**import**
+**Thumbnail in memory from a video file**
 ```dart
-import 'package:video_thumbnail/video_thumbnail.dart';
-```
-**Generate a thumbnail in memory from video file**
-```dart
-final uint8list = await VideoThumbnail.thumbnailData(
-  video: videofile.path,
+final bytes = await VideoThumbnail.thumbnailData(
+  video: videoFile.path,
   imageFormat: ImageFormat.JPEG,
-  maxWidth: 128, // specify the width of the thumbnail, let the height auto-scaled to keep the source aspect ratio
+  maxWidth: 128, // the height follows the video's aspect ratio
   quality: 25,
 );
 ```
 
-**Generate a thumbnail file from video URL**
+**Thumbnail file from a video URL**
 ```dart
-final fileName = await VideoThumbnail.thumbnailFile(
-  video: "https://flutter.github.io/assets-for-api-docs/assets/videos/butterfly.mp4",
+final path = await VideoThumbnail.thumbnailFile(
+  video: 'https://flutter.github.io/assets-for-api-docs/assets/videos/butterfly.mp4',
   thumbnailPath: (await getTemporaryDirectory()).path,
   imageFormat: ImageFormat.WEBP,
-  maxHeight: 64, // specify the height of the thumbnail, let the width auto-scaled to keep the source aspect ratio
+  maxHeight: 64, // the width follows the video's aspect ratio
   quality: 75,
 );
 ```
 
-**Generate a thumbnail file from video Assets declared in pubspec.yaml**
+**Thumbnail file from a video asset**
 ```dart
-final byteData = await rootBundle.load("assets/my_video.mp4");
-Directory tempDir = await getTemporaryDirectory();
-
-File tempVideo = File("${tempDir.path}/assets/my_video.mp4")
+final byteData = await rootBundle.load('assets/my_video.mp4');
+final tempDir = await getTemporaryDirectory();
+final tempVideo = File('${tempDir.path}/assets/my_video.mp4')
   ..createSync(recursive: true)
   ..writeAsBytesSync(byteData.buffer.asUint8List(byteData.offsetInBytes, byteData.lengthInBytes));
 
-final fileName = await VideoThumbnail.thumbnailFile(
+final path = await VideoThumbnail.thumbnailFile(
   video: tempVideo.path,
-  thumbnailPath: (await getTemporaryDirectory()).path,
-  imageFormat: ImageFormat.PNG,  
+  thumbnailPath: tempDir.path,
+  imageFormat: ImageFormat.PNG,
   quality: 100,
 );
 ```
 
-## Notes
-Fork or pull requests are always welcome. Currently it seems have a little performance issue while generating WebP thumbnail by using libwebp under iOS.
+On iOS, WebP is encoded with [libwebp](https://github.com/SDWebImage/libwebp-Xcode).
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). Issues and pull requests are welcome.

@@ -1,14 +1,22 @@
-## 0.5.7 (toyaji fork)
-* iOS: add Swift Package Manager support (based on upstream PR #206 by @danyabdo94).
-  Sources moved to `ios/video_thumbnail/Sources/video_thumbnail/` and shared by both
-  the podspec and `Package.swift` instead of being duplicated.
-* iOS: bump podspec deployment target 8.0 -> 12.0 to match `Package.swift`.
-* Android: Gradle wrapper 6.5 -> 8.14, AGP 4.1.0 -> 8.11.1 (Java 17 compatible).
-* Android: replace the dead `jcenter()` repository with `mavenCentral()`.
-* Android: compileSdk 33 -> 36, minSdk 16 -> 21, Java 17 compileOptions,
-  `lintOptions` -> `lint`, drop the `package` attribute from AndroidManifest
-  (rejected by AGP 8 when `namespace` is set).
-* Dart SDK constraint 2.16 -> 3.0 so the package resolves as a git dependency.
+## 1.0.0
+`justsoft/video_thumbnail` 0.5.6을 이어받아 `video_thumbnail_flutter`라는 이름으로 처음 배포합니다. Dart 공개 API(`VideoThumbnail.thumbnailData` / `thumbnailFile`, `ImageFormat`)와 MethodChannel 이름은 원본과 같아, 옮길 때는 패키지 이름과 import 경로만 바꾸면 됩니다.
+
+* **iOS Swift Package Manager 지원**: `ios/video_thumbnail_flutter/Package.swift`를 추가해 CocoaPods 없이 빌드됩니다. Flutter 3.44 플러그인 규격대로 `FlutterFramework` 패키지에 의존하고, WebP 인코딩은 `libwebp-Xcode`(1.5.0 이상)를 씁니다. CocoaPods용 podspec도 같은 소스를 쓰도록 유지합니다. (원본 PR #206 참고)
+* **iOS 개인정보 매니페스트**: `PrivacyInfo.xcprivacy`를 SPM·CocoaPods 양쪽에 포함합니다.
+* **Android Gradle 최신화**: AGP 4.1 → 9.3.1, Gradle Kotlin DSL(`build.gradle.kts`), `namespace` 선언, compileSdk 33 → 36, Java 17, `jcenter()` 제거.
+* **[BREAKING] 실패를 오류 코드가 담긴 `PlatformException`으로 전달**: Android는 어떤 실패든 `MissingPluginException`으로, iOS는 `thumbnailData`가 `null`·`thumbnailFile`이 "IO Error"로만 돌아와 원인을 알 수 없었습니다. 이제 두 플랫폼 모두 `VideoThumbnailErrorCode`(`source_error` / `no_frame` / `encode_error` / `io_error`) 코드와 네이티브 원인 메시지를 담아 던집니다. `null` 반환에 기대던 코드는 `try`/`catch`로 바꿔야 합니다. (원본 #188, #191, #75, #77, #52, #78, #94, #99, #109, #134, #164, #195)
+* **iOS 공백·한글 파일명 경로 수정**: `thumbnailFile`이 `%20` 같은 퍼센트 인코딩 경로나 자모 분리형(NFD) 한글 경로를 돌려주던 문제를 고쳤습니다. 호출자가 준 경로 문자열 그대로 파일 경로를 만듭니다. (원본 #107)
+* **iOS WebP 메모리 관리 수정**: 소유하지 않은 color space·data provider를 해제해 크래시가 날 수 있던 문제, 프레임 이미지와 libwebp 출력 버퍼를 해제하지 않던 누수를 고쳤습니다.
+* **iOS HDR·16비트 프레임 WebP 지원**: 8비트 BGRA가 아닌 프레임(HDR, 16비트·float 성분, 다른 색공간)은 WebP가 `null`이던 문제를 고쳤습니다. 8비트 sRGB로 다시 그린 뒤 인코딩합니다. (원본 #195)
+* **`thumbnailPath` 없이 쓰기 실패 수정**: 영상 폴더에 쓸 수 없으면(갤러리·외부 저장소 등) 앱 캐시 폴더에 대신 씁니다. (원본 #96, #144, #133, #59, #43)
+* **Android 프레임을 못 읽던 영상 대응**: 가장 가까운 프레임(`OPTION_CLOSEST`)을 못 얻으면 가장 가까운 키프레임(`OPTION_CLOSEST_SYNC`)으로 한 번 더 시도합니다. (원본 #106, #56, #140, #148)
+* **Android 리소스 누수 수정**: 영상 파일 스트림을 닫고(원본 #166), 축소 전 원본 비트맵을 해제합니다.
+* **Android `timeMs` 넘침 수정**: 약 35분 47초를 넘는 `timeMs`가 `int` 곱셈으로 넘치던 문제를 고쳤습니다.
+* **Android 빌드 경고 정리**: 인자 캐스트 경고를 없애고, API 30 이상에서는 deprecated된 `WEBP` 대신 `WEBP_LOSSY`/`WEBP_LOSSLESS`를 씁니다(quality 100이면 무손실, iOS와 같음). (원본 #205)
+* **[BREAKING] 최소 버전 상향**: Flutter 3.44 / Dart 3.7, iOS 13.0, Android API 24(Flutter 3.50 기본값).
+* **Dart**: null safety 이전 문법 정리, `flutter_lints` 적용, `invokeMethod`에 반환 타입 명시.
+* **테스트·CI**: MethodChannel 인자·오류 단위 테스트와 예제 앱 통합 테스트(실제 영상으로 형식·크기·경로·오류 코드 확인)를 새로 작성하고, PR마다 format·analyze·test·Android 빌드·iOS SPM 빌드·`pub publish --dry-run`을 실행합니다.
+* **예제 앱 재작성**: 최신 Flutter 템플릿, `image_picker` / `path_provider` 최신 버전, SPM 전용 iOS 프로젝트.
 
 ## 0.5.6
 * Actually add the namespace fix for Android

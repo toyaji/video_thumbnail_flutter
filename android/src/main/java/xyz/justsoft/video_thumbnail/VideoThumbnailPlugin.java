@@ -3,16 +3,17 @@ package xyz.justsoft.video_thumbnail;
 import android.content.Context;
 import android.graphics.Bitmap;
 import android.media.MediaMetadataRetriever;
+import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
 
 import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
-import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.util.HashMap;
@@ -26,16 +27,23 @@ import io.flutter.plugin.common.MethodChannel;
 import io.flutter.plugin.common.MethodChannel.MethodCallHandler;
 import io.flutter.plugin.common.MethodChannel.Result;
 
-/**
- * VideoThumbnailPlugin
- */
 public class VideoThumbnailPlugin implements FlutterPlugin, MethodCallHandler {
-    private static String TAG = "ThumbnailPlugin";
-    private static final int HIGH_QUALITY_MIN_VAL = 70;
+    private static final String TAG = "ThumbnailPlugin";
 
     private Context context;
     private ExecutorService executor;
     private MethodChannel channel;
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
+
+    /** Dart의 PlatformException.code로 그대로 전달되는 실패 원인. 코드 값은 iOS와 같다. */
+    static final class ThumbnailException extends Exception {
+        final String code;
+
+        ThumbnailException(String code, String message, @Nullable Throwable cause) {
+            super(message, cause);
+            this.code = code;
+        }
+    }
 
     @Override
     public void onAttachedToEngine(@NonNull FlutterPluginBinding binding) {
@@ -55,213 +63,232 @@ public class VideoThumbnailPlugin implements FlutterPlugin, MethodCallHandler {
 
     @Override
     public void onMethodCall(@NonNull MethodCall call, @NonNull final Result result) {
-        final Map<String, Object> args = call.arguments();
-
-        final String video = (String) args.get("video");
-        final HashMap<String, String> headers = (HashMap<String, String>) args.get("headers");
-        final int format = (int) args.get("format");
-        final int maxh = (int) args.get("maxh");
-        final int maxw = (int) args.get("maxw");
-        final int timeMs = (int) args.get("timeMs");
-        final int quality = (int) args.get("quality");
         final String method = call.method;
+        if (!method.equals("file") && !method.equals("data")) {
+            result.notImplemented();
+            return;
+        }
 
-        executor.execute(new Runnable() {
-            @Override
-            public void run() {
-                Object thumbnail = null;
-                boolean handled = false;
-                Exception exc = null;
+        final String video = call.argument("video");
+        final Map<String, String> headers = call.argument("headers");
+        final String path = call.argument("path");
+        final int format = intArg(call, "format");
+        final int maxh = intArg(call, "maxh");
+        final int maxw = intArg(call, "maxw");
+        final int timeMs = intArg(call, "timeMs");
+        final int quality = intArg(call, "quality");
 
-                try {
-                    if (method.equals("file")) {
-                        final String path = (String) args.get("path");
-                        thumbnail = buildThumbnailFile(video, headers, path, format, maxh, maxw, timeMs, quality);
-                        handled = true;
-
-                    } else if (method.equals("data")) {
-                        thumbnail = buildThumbnailData(video, headers, format, maxh, maxw, timeMs, quality);
-                        handled = true;
-                    }
-                } catch (Exception e) {
-                    exc = e;
-                }
-
-                onResult(result, thumbnail, handled, exc);
+        executor.execute(() -> {
+            try {
+                final Object thumbnail = method.equals("file")
+                        ? buildThumbnailFile(video, headers, path, format, maxh, maxw, timeMs, quality)
+                        : buildThumbnailData(video, headers, format, maxh, maxw, timeMs, quality);
+                mainHandler.post(() -> result.success(thumbnail));
+            } catch (ThumbnailException e) {
+                Log.w(TAG, e.getMessage(), e.getCause());
+                mainHandler.post(() -> result.error(e.code, e.getMessage(), causeDetails(e)));
+            } catch (Exception e) {
+                Log.w(TAG, "thumbnail failed", e);
+                mainHandler.post(() -> result.error("exception", String.valueOf(e), null));
             }
         });
     }
 
-    private static Bitmap.CompressFormat intToFormat(int format) {
+    private static int intArg(MethodCall call, String key) {
+        final Integer value = call.argument(key);
+        return value == null ? 0 : value;
+    }
+
+    @Nullable
+    private static String causeDetails(Throwable e) {
+        return e.getCause() == null ? null : String.valueOf(e.getCause());
+    }
+
+    @SuppressWarnings("deprecation")
+    private static Bitmap.CompressFormat intToFormat(int format, int quality) {
         switch (format) {
-            default:
-            case 0:
-                return Bitmap.CompressFormat.JPEG;
             case 1:
                 return Bitmap.CompressFormat.PNG;
             case 2:
+                // iOS와 같게 quality 100은 무손실 WebP로 인코딩한다.
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    return quality == 100 ? Bitmap.CompressFormat.WEBP_LOSSLESS : Bitmap.CompressFormat.WEBP_LOSSY;
+                }
                 return Bitmap.CompressFormat.WEBP;
+            case 0:
+            default:
+                return Bitmap.CompressFormat.JPEG;
         }
     }
 
     private static String formatExt(int format) {
         switch (format) {
-            default:
-            case 0:
-                return "jpg";
             case 1:
                 return "png";
             case 2:
                 return "webp";
+            case 0:
+            default:
+                return "jpg";
         }
     }
 
-    private byte[] buildThumbnailData(final String vidPath, final HashMap<String, String> headers, int format, int maxh,
-            int maxw, int timeMs, int quality) {
-        // Log.d(TAG, String.format("buildThumbnailData( format:%d, maxh:%d, maxw:%d,
-        // timeMs:%d, quality:%d )", format, maxh, maxw, timeMs, quality));
-        Bitmap bitmap = createVideoThumbnail(vidPath, headers, maxh, maxw, timeMs);
-        if (bitmap == null)
-            throw new NullPointerException();
-
-        ByteArrayOutputStream stream = new ByteArrayOutputStream();
-        bitmap.compress(intToFormat(format), quality, stream);
-        bitmap.recycle();
-        if (bitmap == null)
-            throw new NullPointerException();
-        return stream.toByteArray();
-    }
-
-    private String buildThumbnailFile(final String vidPath, final HashMap<String, String> headers, String path,
-            int format, int maxh, int maxw, int timeMs,
-            int quality) {
-        // Log.d(TAG, String.format("buildThumbnailFile( format:%d, maxh:%d, maxw:%d,
-        // timeMs:%d, quality:%d )", format, maxh, maxw, timeMs, quality));
-        final byte bytes[] = buildThumbnailData(vidPath, headers, format, maxh, maxw, timeMs, quality);
-        final String ext = formatExt(format);
-        final int i = vidPath.lastIndexOf(".");
-        String fullpath = vidPath.substring(0, i + 1) + ext;
-        final boolean isLocalFile = (vidPath.startsWith("/") || vidPath.startsWith("file://"));
-
-        if (path == null && !isLocalFile) {
-            path = context.getCacheDir().getAbsolutePath();
-        }
-
-        if (path != null) {
-            if (path.endsWith(ext)) {
-                fullpath = path;
-            } else {
-                // try to save to same folder as the vidPath
-                final int j = fullpath.lastIndexOf("/");
-
-                if (path.endsWith("/")) {
-                    fullpath = path + fullpath.substring(j + 1);
-                } else {
-                    fullpath = path + fullpath.substring(j);
-                }
-            }
-        }
-
+    private byte[] buildThumbnailData(String video, @Nullable Map<String, String> headers, int format, int maxh,
+            int maxw, int timeMs, int quality) throws ThumbnailException {
+        final Bitmap bitmap = createVideoThumbnail(video, headers, maxh, maxw, timeMs);
         try {
-            FileOutputStream f = new FileOutputStream(fullpath);
-            f.write(bytes);
-            f.close();
-            Log.d(TAG, String.format("buildThumbnailFile( written:%d )", bytes.length));
-        } catch (java.io.IOException e) {
-            e.printStackTrace();
-            throw new RuntimeException(e);
-        }
-        return fullpath;
-    }
-
-    private void onResult(final Result result, final Object thumbnail, final boolean handled, final Exception e) {
-        runOnUiThread(new Runnable() {
-            @Override
-            public void run() {
-                if (!handled) {
-                    result.notImplemented();
-                    return;
-                }
-
-                if (e != null) {
-                    e.printStackTrace();
-                    result.error("exception", e.getMessage(), null);
-                    return;
-                }
-
-                result.success(thumbnail);
+            final ByteArrayOutputStream stream = new ByteArrayOutputStream();
+            if (!bitmap.compress(intToFormat(format, quality), quality, stream)) {
+                throw new ThumbnailException("encode_error", "Failed to encode the thumbnail as " + formatExt(format),
+                        null);
             }
-        });
+            return stream.toByteArray();
+        } finally {
+            bitmap.recycle();
+        }
     }
 
-    private static void runOnUiThread(Runnable runnable) {
-        new Handler(Looper.getMainLooper()).post(runnable);
+    private String buildThumbnailFile(String video, @Nullable Map<String, String> headers, @Nullable String path,
+            int format, int maxh, int maxw, int timeMs, int quality) throws ThumbnailException {
+        final byte[] bytes = buildThumbnailData(video, headers, format, maxh, maxw, timeMs, quality);
+        final String ext = formatExt(format);
+        final String fileName = thumbnailFileName(video, ext);
+        final boolean isLocalFile = video.startsWith("/") || video.startsWith("file://");
+        final String cacheDir = context.getCacheDir().getAbsolutePath();
+
+        if (path != null && !path.isEmpty()) {
+            final String target = path.endsWith("." + ext) ? path : new File(path, fileName).getAbsolutePath();
+            writeFile(target, bytes);
+            return target;
+        }
+
+        if (isLocalFile) {
+            // 앱이 쓸 수 없는 폴더(갤러리·외부 저장소)의 영상이면 캐시 폴더로 대신 쓴다.
+            final String besideVideo = new File(new File(localPath(video)).getParentFile(), fileName).getAbsolutePath();
+            try {
+                writeFile(besideVideo, bytes);
+                return besideVideo;
+            } catch (ThumbnailException e) {
+                Log.w(TAG, "cannot write beside the video, using the cache folder: " + e.getMessage());
+            }
+        }
+
+        final String inCache = new File(cacheDir, fileName).getAbsolutePath();
+        writeFile(inCache, bytes);
+        return inCache;
+    }
+
+    private static String thumbnailFileName(String video, String ext) {
+        String name = video;
+        final int query = name.indexOf('?');
+        if (query >= 0 && !video.startsWith("/")) {
+            name = name.substring(0, query);
+        }
+        name = name.substring(name.lastIndexOf('/') + 1);
+        final int dot = name.lastIndexOf('.');
+        if (dot > 0) {
+            name = name.substring(0, dot);
+        }
+        if (name.isEmpty()) {
+            name = "thumbnail";
+        }
+        return name + "." + ext;
+    }
+
+    private static String localPath(String video) {
+        return video.startsWith("file://") ? video.substring(7) : video;
+    }
+
+    private static void writeFile(String fullpath, byte[] bytes) throws ThumbnailException {
+        try (FileOutputStream f = new FileOutputStream(fullpath)) {
+            f.write(bytes);
+        } catch (IOException e) {
+            throw new ThumbnailException("io_error", "Failed to write the thumbnail to " + fullpath, e);
+        }
     }
 
     /**
-     * Create a video thumbnail for a video. May return null if the video is corrupt
-     * or the format is not supported.
+     * Returns a frame of the video scaled to the requested size.
      *
-     * @param video   the URI of video
-     * @param targetH the max height of the thumbnail
-     * @param targetW the max width of the thumbnail
+     * @param targetH the max height of the thumbnail, 0 to follow the aspect ratio
+     * @param targetW the max width of the thumbnail, 0 to follow the aspect ratio
      */
-    public Bitmap createVideoThumbnail(final String video, final HashMap<String, String> headers, int targetH,
-            int targetW, int timeMs) {
-        Bitmap bitmap = null;
-        MediaMetadataRetriever retriever = new MediaMetadataRetriever();
+    private Bitmap createVideoThumbnail(String video, @Nullable Map<String, String> headers, int targetH,
+            int targetW, int timeMs) throws ThumbnailException {
+        final MediaMetadataRetriever retriever = new MediaMetadataRetriever();
         try {
-            if (video.startsWith("/")) {
-                setDataSource(video, retriever);
-            } else if (video.startsWith("file://")) {
-                setDataSource(video.substring(7), retriever);
-            } else {
-                retriever.setDataSource(video, (headers != null) ? headers : new HashMap<String, String>());
+            try {
+                if (video.startsWith("/") || video.startsWith("file://")) {
+                    setDataSource(localPath(video), retriever);
+                } else {
+                    retriever.setDataSource(video, headers != null ? headers : new HashMap<>());
+                }
+            } catch (IOException | RuntimeException e) {
+                throw new ThumbnailException("source_error", "Failed to open the video: " + video, e);
             }
 
-            if (targetH != 0 || targetW != 0) {
-                if (android.os.Build.VERSION.SDK_INT >= 27 && targetH != 0 && targetW != 0) {
-                    // API Level 27
-                    bitmap = retriever.getScaledFrameAtTime(timeMs * 1000, MediaMetadataRetriever.OPTION_CLOSEST,
-                            targetW, targetH);
-                } else {
-                    bitmap = retriever.getFrameAtTime(timeMs * 1000, MediaMetadataRetriever.OPTION_CLOSEST);
-                    if (bitmap != null) {
-                        int width = bitmap.getWidth();
-                        int height = bitmap.getHeight();
-                        if (targetW == 0) {
-                            targetW = Math.round(((float) targetH / height) * width);
-                        }
-                        if (targetH == 0) {
-                            targetH = Math.round(((float) targetW / width) * height);
-                        }
-                        Log.d(TAG, String.format("original w:%d, h:%d => %d, %d", width, height, targetW, targetH));
-                        bitmap = Bitmap.createScaledBitmap(bitmap, targetW, targetH, true);
-                    }
-                }
-            } else {
-                bitmap = retriever.getFrameAtTime(timeMs * 1000, MediaMetadataRetriever.OPTION_CLOSEST);
+            final long timeUs = timeMs * 1000L;
+            // API 27+는 두 변을 모두 받으면 디코더가 직접 축소한다. 나머지는 원본 프레임을 받아 여기서 줄인다.
+            final boolean decoderScales = targetH != 0 && targetW != 0
+                    && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1;
+            Bitmap bitmap;
+            try {
+                bitmap = frameAt(retriever, timeUs, decoderScales ? targetW : 0, decoderScales ? targetH : 0);
+            } catch (RuntimeException e) {
+                throw new ThumbnailException("no_frame", "Failed to read a frame at " + timeMs + " ms", e);
             }
-        } catch (IllegalArgumentException ex) {
-            ex.printStackTrace();
-        } catch (RuntimeException ex) {
-            ex.printStackTrace();
-        } catch (IOException ex) {
-            ex.printStackTrace();
+            if (bitmap == null) {
+                throw new ThumbnailException("no_frame", "The video has no frame at " + timeMs + " ms", null);
+            }
+
+            if (!decoderScales && (targetH != 0 || targetW != 0)) {
+                final int width = bitmap.getWidth();
+                final int height = bitmap.getHeight();
+                final int w = targetW != 0 ? targetW : Math.round(((float) targetH / height) * width);
+                final int h = targetH != 0 ? targetH : Math.round(((float) targetW / width) * height);
+                final Bitmap scaled = Bitmap.createScaledBitmap(bitmap, w, h, true);
+                if (scaled != bitmap) {
+                    bitmap.recycle();
+                }
+                bitmap = scaled;
+            }
+            return bitmap;
         } finally {
             try {
                 retriever.release();
-            } catch (RuntimeException | IOException ex) {
-                ex.printStackTrace();
+            } catch (IOException | RuntimeException e) {
+                Log.w(TAG, "failed to release MediaMetadataRetriever", e);
             }
         }
-
-        return bitmap;
     }
 
-    private static void setDataSource(String video, final MediaMetadataRetriever retriever) throws IOException {
-        File videoFile = new File(video);
-        FileInputStream inputStream = new FileInputStream(videoFile.getAbsolutePath());
-        retriever.setDataSource(inputStream.getFD());
+    /** 가장 가까운 프레임을 못 얻는 영상·기기가 있어, 실패하면 가장 가까운 키프레임으로 한 번 더 시도한다. */
+    @Nullable
+    private static Bitmap frameAt(MediaMetadataRetriever retriever, long timeUs, int scaledW, int scaledH) {
+        final boolean scaled = scaledW != 0 && scaledH != 0;
+        final int[] options = { MediaMetadataRetriever.OPTION_CLOSEST, MediaMetadataRetriever.OPTION_CLOSEST_SYNC };
+        RuntimeException lastError = null;
+        for (int option : options) {
+            try {
+                final Bitmap bitmap = scaled
+                        ? retriever.getScaledFrameAtTime(timeUs, option, scaledW, scaledH)
+                        : retriever.getFrameAtTime(timeUs, option);
+                if (bitmap != null) {
+                    return bitmap;
+                }
+            } catch (RuntimeException e) {
+                lastError = e;
+            }
+        }
+        if (lastError != null) {
+            throw lastError;
+        }
+        return null;
+    }
+
+    private static void setDataSource(String video, MediaMetadataRetriever retriever) throws IOException {
+        try (FileInputStream inputStream = new FileInputStream(new File(video).getAbsolutePath())) {
+            retriever.setDataSource(inputStream.getFD());
+        }
     }
 }

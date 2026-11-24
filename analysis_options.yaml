@@ -1,0 +1,12 @@
+include: package:flutter_lints/flutter.yaml
+
+analyzer:
+  exclude:
+    - build/**
+    - android/**
+    - ios/**
+
+linter:
+  rules:
+    # ImageFormat.JPEG/PNG/WEBP는 원본 video_thumbnail과 같은 공개 API라 이름을 바꾸지 않는다.
+    constant_identifier_names: false

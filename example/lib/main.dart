@@ -1,448 +1,171 @@
-import 'dart:async';
+import 'dart:io';
 import 'dart:typed_data';
 
-import 'package:flutter/material.dart';
-import 'dart:io';
-
-import 'package:video_thumbnail/video_thumbnail.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:video_thumbnail_flutter/video_thumbnail_flutter.dart';
 
-void main() => runApp(MyApp());
+const sampleVideoUrl =
+    'https://flutter.github.io/assets-for-api-docs/assets/videos/butterfly.mp4';
+
+void main() {
+  runApp(const MyApp());
+}
 
 class MyApp extends StatelessWidget {
+  const MyApp({super.key});
+
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      home: DemoHome(),
-    );
+    return const MaterialApp(home: ThumbnailPage());
   }
 }
 
-class ThumbnailRequest {
-  final String video;
-  final String thumbnailPath;
-  final ImageFormat imageFormat;
-  final int maxHeight;
-  final int maxWidth;
-  final int timeMs;
-  final int quality;
-
-  const ThumbnailRequest(
-      {this.video,
-      this.thumbnailPath,
-      this.imageFormat,
-      this.maxHeight,
-      this.maxWidth,
-      this.timeMs,
-      this.quality});
-}
-
-class ThumbnailResult {
-  final Image image;
-  final int dataSize;
-  final int height;
-  final int width;
-  const ThumbnailResult({this.image, this.dataSize, this.height, this.width});
-}
-
-Future<ThumbnailResult> genThumbnail(ThumbnailRequest r) async {
-  //WidgetsFlutterBinding.ensureInitialized();
-  Uint8List bytes;
-  final Completer<ThumbnailResult> completer = Completer();
-  if (r.thumbnailPath != null) {
-    final thumbnailPath = await VideoThumbnail.thumbnailFile(
-        video: r.video,
-        headers: {
-          "USERHEADER1": "user defined header1",
-          "USERHEADER2": "user defined header2",
-        },
-        thumbnailPath: r.thumbnailPath,
-        imageFormat: r.imageFormat,
-        maxHeight: r.maxHeight,
-        maxWidth: r.maxWidth,
-        timeMs: r.timeMs,
-        quality: r.quality);
-
-    print("thumbnail file is located: $thumbnailPath");
-
-    final file = File(thumbnailPath);
-    bytes = file.readAsBytesSync();
-  } else {
-    bytes = await VideoThumbnail.thumbnailData(
-        video: r.video,
-        headers: {
-          "USERHEADER1": "user defined header1",
-          "USERHEADER2": "user defined header2",
-        },
-        imageFormat: r.imageFormat,
-        maxHeight: r.maxHeight,
-        maxWidth: r.maxWidth,
-        timeMs: r.timeMs,
-        quality: r.quality);
-  }
-
-  int _imageDataSize = bytes.length;
-  print("image size: $_imageDataSize");
-
-  final _image = Image.memory(bytes);
-  _image.image
-      .resolve(ImageConfiguration())
-      .addListener(ImageStreamListener((ImageInfo info, bool _) {
-    completer.complete(ThumbnailResult(
-      image: _image,
-      dataSize: _imageDataSize,
-      height: info.image.height,
-      width: info.image.width,
-    ));
-  }));
-  return completer.future;
-}
-
-class GenThumbnailImage extends StatefulWidget {
-  final ThumbnailRequest thumbnailRequest;
-
-  const GenThumbnailImage({Key key, this.thumbnailRequest}) : super(key: key);
+class ThumbnailPage extends StatefulWidget {
+  const ThumbnailPage({super.key});
 
   @override
-  _GenThumbnailImageState createState() => _GenThumbnailImageState();
+  State<ThumbnailPage> createState() => _ThumbnailPageState();
 }
 
-class _GenThumbnailImageState extends State<GenThumbnailImage> {
-  @override
-  Widget build(BuildContext context) {
-    return FutureBuilder<ThumbnailResult>(
-      future: genThumbnail(widget.thumbnailRequest),
-      builder: (BuildContext context, AsyncSnapshot snapshot) {
-        if (snapshot.hasData) {
-          final _image = snapshot.data.image;
-          final _width = snapshot.data.width;
-          final _height = snapshot.data.height;
-          final _dataSize = snapshot.data.dataSize;
-          return Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: <Widget>[
-              Center(
-                child: Text(
-                    "Image ${widget.thumbnailRequest.thumbnailPath == null ? 'data size' : 'file size'}: $_dataSize, width:$_width, height:$_height"),
-              ),
-              Container(
-                color: Colors.grey,
-                height: 1.0,
-              ),
-              _image,
-            ],
-          );
-        } else if (snapshot.hasError) {
-          return Container(
-            padding: EdgeInsets.all(8.0),
-            color: Colors.red,
-            child: Text(
-              "Error:\n${snapshot.error.toString()}",
-            ),
-          );
-        } else {
-          return Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: <Widget>[
-                Text(
-                    "Generating the thumbnail for: ${widget.thumbnailRequest.video}..."),
-                SizedBox(
-                  height: 10.0,
-                ),
-                CircularProgressIndicator(),
-              ]);
-        }
-      },
-    );
-  }
-}
-
-class ImageInFile extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return Container();
-  }
-}
-
-class DemoHome extends StatefulWidget {
-  @override
-  _DemoHomeState createState() => _DemoHomeState();
-}
-
-class _DemoHomeState extends State<DemoHome> {
-  final _editNode = FocusNode();
-  final _video = TextEditingController(
-      text:
-          "https://flutter.github.io/assets-for-api-docs/assets/videos/butterfly.mp4");
+class _ThumbnailPageState extends State<ThumbnailPage> {
+  final _video = TextEditingController(text: sampleVideoUrl);
   ImageFormat _format = ImageFormat.JPEG;
-  int _quality = 50;
-  int _sizeH = 0;
-  int _sizeW = 0;
-  int _timeMs = 0;
+  double _maxWidth = 256;
+  double _timeMs = 0;
+  double _quality = 75;
+  bool _toFile = false;
+  bool _busy = false;
 
-  GenThumbnailImage _futreImage;
-
-  String _tempDir;
+  Uint8List? _bytes;
+  String? _status;
 
   @override
-  void initState() {
-    super.initState();
-    getTemporaryDirectory().then((d) => _tempDir = d.path);
+  void dispose() {
+    _video.dispose();
+    super.dispose();
+  }
+
+  Future<void> _pickVideo() async {
+    final picked = await ImagePicker().pickVideo(source: ImageSource.gallery);
+    if (picked != null) setState(() => _video.text = picked.path);
+  }
+
+  Future<void> _generate() async {
+    setState(() {
+      _busy = true;
+      _status = null;
+    });
+    final stopwatch = Stopwatch()..start();
+    try {
+      Uint8List? bytes;
+      String? path;
+      if (_toFile) {
+        path = await VideoThumbnail.thumbnailFile(
+          video: _video.text,
+          thumbnailPath: (await getTemporaryDirectory()).path,
+          imageFormat: _format,
+          maxWidth: _maxWidth.round(),
+          timeMs: _timeMs.round(),
+          quality: _quality.round(),
+        );
+        if (path != null) bytes = await File(path).readAsBytes();
+      } else {
+        bytes = await VideoThumbnail.thumbnailData(
+          video: _video.text,
+          imageFormat: _format,
+          maxWidth: _maxWidth.round(),
+          timeMs: _timeMs.round(),
+          quality: _quality.round(),
+        );
+      }
+      setState(() {
+        _bytes = bytes;
+        _status = bytes == null
+            ? 'No thumbnail was created.'
+            : '${bytes.length} bytes in ${stopwatch.elapsedMilliseconds} ms'
+                  '${path == null ? '' : '\n$path'}';
+      });
+    } catch (e) {
+      setState(() {
+        _bytes = null;
+        _status = '$e';
+      });
+    } finally {
+      setState(() => _busy = false);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    final _settings = <Widget>[
-      Slider(
-        value: _sizeH * 1.0,
-        onChanged: (v) => setState(() {
-          _editNode.unfocus();
-          _sizeH = v.toInt();
-        }),
-        max: 256.0,
-        divisions: 256,
-        label: "$_sizeH",
-      ),
-      Center(
-        child: (_sizeH == 0)
-            ? const Text(
-                "Original of the video's height or scaled by the source aspect ratio")
-            : Text("Max height: $_sizeH(px)"),
-      ),
-      Slider(
-        value: _sizeW * 1.0,
-        onChanged: (v) => setState(() {
-          _editNode.unfocus();
-          _sizeW = v.toInt();
-        }),
-        max: 256.0,
-        divisions: 256,
-        label: "$_sizeW",
-      ),
-      Center(
-        child: (_sizeW == 0)
-            ? const Text(
-                "Original of the video's width or scaled by source aspect ratio")
-            : Text("Max width: $_sizeW(px)"),
-      ),
-      Slider(
-        value: _timeMs * 1.0,
-        onChanged: (v) => setState(() {
-          _editNode.unfocus();
-          _timeMs = v.toInt();
-        }),
-        max: 10.0 * 1000,
-        divisions: 1000,
-        label: "$_timeMs",
-      ),
-      Center(
-        child: (_timeMs == 0)
-            ? const Text("The beginning of the video")
-            : Text("The closest frame at $_timeMs(ms) of the video"),
-      ),
-      Slider(
-        value: _quality * 1.0,
-        onChanged: (v) => setState(() {
-          _editNode.unfocus();
-          _quality = v.toInt();
-        }),
-        max: 100.0,
-        divisions: 100,
-        label: "$_quality",
-      ),
-      Center(child: Text("Quality: $_quality")),
-      Padding(
-        padding: const EdgeInsets.fromLTRB(2.0, 10.0, 2.0, 8.0),
-        child: InputDecorator(
-          decoration: InputDecoration(
-            border: OutlineInputBorder(),
-            filled: true,
-            isDense: true,
-            labelText: "Thumbnail Format",
-          ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-            mainAxisSize: MainAxisSize.max,
-            children: <Widget>[
-              Row(
-                  mainAxisAlignment: MainAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: <Widget>[
-                    Radio<ImageFormat>(
-                      groupValue: _format,
-                      value: ImageFormat.JPEG,
-                      onChanged: (v) => setState(() {
-                        _format = v;
-                        _editNode.unfocus();
-                      }),
-                    ),
-                    const Text("JPEG"),
-                  ]),
-              Row(
-                  mainAxisAlignment: MainAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: <Widget>[
-                    Radio<ImageFormat>(
-                      groupValue: _format,
-                      value: ImageFormat.PNG,
-                      onChanged: (v) => setState(() {
-                        _format = v;
-                        _editNode.unfocus();
-                      }),
-                    ),
-                    const Text("PNG"),
-                  ]),
-              Row(
-                  mainAxisAlignment: MainAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: <Widget>[
-                    Radio<ImageFormat>(
-                      groupValue: _format,
-                      value: ImageFormat.WEBP,
-                      onChanged: (v) => setState(() {
-                        _format = v;
-                        _editNode.unfocus();
-                      }),
-                    ),
-                    const Text("WebP"),
-                  ]),
-            ],
-          ),
-        ),
-      )
-    ];
     return Scaffold(
-        appBar: AppBar(
-          title: const Text('Thumbnail Plugin example'),
-        ),
-        body: Column(
-          mainAxisAlignment: MainAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            Padding(
-              padding: const EdgeInsets.fromLTRB(2.0, 10.0, 2.0, 8.0),
-              child: TextField(
-                decoration: InputDecoration(
-                  border: OutlineInputBorder(),
-                  filled: true,
-                  isDense: true,
-                  labelText: "Video URI",
-                ),
-                maxLines: null,
-                controller: _video,
-                focusNode: _editNode,
-                keyboardType: TextInputType.url,
-                textInputAction: TextInputAction.done,
-                onEditingComplete: () {
-                  _editNode.unfocus();
-                },
+      appBar: AppBar(title: const Text('video_thumbnail_flutter')),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          TextField(
+            controller: _video,
+            decoration: InputDecoration(
+              labelText: 'Video path or URL',
+              suffixIcon: IconButton(
+                icon: const Icon(Icons.video_library),
+                onPressed: _pickVideo,
               ),
             ),
-            for (var i in _settings) i,
-            Expanded(
-              child: Container(
-                color: Colors.grey[300],
-                child: Scrollbar(
-                  child: ListView(
-                    shrinkWrap: true,
-                    children: <Widget>[
-                      (_futreImage != null) ? _futreImage : SizedBox(),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
-        drawer: Drawer(
-          child: Column(
-            children: <Widget>[
-              AppBar(
-                title: const Text("Settings"),
-                actions: <Widget>[
-                  IconButton(
-                    icon: Icon(Icons.close),
-                    onPressed: () => Navigator.pop(context),
-                  )
-                ],
-              ),
-              for (var i in _settings) i,
+          ),
+          const SizedBox(height: 12),
+          SegmentedButton<ImageFormat>(
+            segments: [
+              for (final f in ImageFormat.values)
+                ButtonSegment(value: f, label: Text(f.name)),
             ],
+            selected: {_format},
+            onSelectionChanged: (s) => setState(() => _format = s.first),
+          ),
+          _slider('Max width', _maxWidth, 0, 1024, (v) => _maxWidth = v),
+          _slider('Time (ms)', _timeMs, 0, 10000, (v) => _timeMs = v),
+          _slider('Quality', _quality, 0, 100, (v) => _quality = v),
+          SwitchListTile(
+            title: const Text('Save to file'),
+            value: _toFile,
+            onChanged: (v) => setState(() => _toFile = v),
+          ),
+          FilledButton(
+            onPressed: _busy ? null : _generate,
+            child: Text(_busy ? 'Generating…' : 'Generate thumbnail'),
+          ),
+          if (_status != null)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              child: Text(_status!, key: const Key('status')),
+            ),
+          if (_bytes != null) Image.memory(_bytes!),
+        ],
+      ),
+    );
+  }
+
+  Widget _slider(
+    String label,
+    double value,
+    double min,
+    double max,
+    void Function(double) update,
+  ) {
+    return Row(
+      children: [
+        SizedBox(width: 90, child: Text(label)),
+        Expanded(
+          child: Slider(
+            value: value,
+            min: min,
+            max: max,
+            onChanged: (v) => setState(() => update(v)),
           ),
         ),
-        floatingActionButton: Row(
-          mainAxisAlignment: MainAxisAlignment.end,
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            FloatingActionButton(
-              onPressed: () async {
-                File video =
-                    await ImagePicker.pickVideo(source: ImageSource.camera);
-                setState(() {
-                  _video.text = video.path;
-                });
-              },
-              child: Icon(Icons.videocam),
-              tooltip: "Capture a video",
-            ),
-            const SizedBox(
-              width: 5.0,
-            ),
-            FloatingActionButton(
-              onPressed: () async {
-                File video =
-                    await ImagePicker.pickVideo(source: ImageSource.gallery);
-                setState(() {
-                  _video.text = video?.path;
-                });
-              },
-              child: Icon(Icons.local_movies),
-              tooltip: "Pick a video",
-            ),
-            const SizedBox(
-              width: 20.0,
-            ),
-            FloatingActionButton(
-              tooltip: "Generate a data of thumbnail",
-              onPressed: () async {
-                setState(() {
-                  _futreImage = GenThumbnailImage(
-                      thumbnailRequest: ThumbnailRequest(
-                          video: _video.text,
-                          thumbnailPath: null,
-                          imageFormat: _format,
-                          maxHeight: _sizeH,
-                          maxWidth: _sizeW,
-                          timeMs: _timeMs,
-                          quality: _quality));
-                });
-              },
-              child: const Text("Data"),
-            ),
-            const SizedBox(
-              width: 5.0,
-            ),
-            FloatingActionButton(
-              tooltip: "Generate a file of thumbnail",
-              onPressed: () async {
-                setState(() {
-                  _futreImage = GenThumbnailImage(
-                      thumbnailRequest: ThumbnailRequest(
-                          video: _video.text,
-                          thumbnailPath: _tempDir,
-                          imageFormat: _format,
-                          maxHeight: _sizeH,
-                          maxWidth: _sizeW,
-                          timeMs: _timeMs,
-                          quality: _quality));
-                });
-              },
-              child: const Text("File"),
-            ),
-          ],
-        ));
+        SizedBox(width: 48, child: Text('${value.round()}')),
+      ],
+    );
   }
 }
